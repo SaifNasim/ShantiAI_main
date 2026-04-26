@@ -38,6 +38,10 @@ Guidelines:
 Start conversations warmly, and always end with something supportive or a gentle question to continue the dialogue.`
 
 export async function POST(req: Request) {
+  if (!process.env.GROQ_API_KEY) {
+    return new Response('AI service is not configured. Missing GROQ_API_KEY.', { status: 500 })
+  }
+
   const { messages }: { messages: UIMessage[] } = await req.json()
 
   // Crisis detection on the latest user message
@@ -66,17 +70,22 @@ export async function POST(req: Request) {
     }
   }
 
-  const result = streamText({
-    model: groq('llama-3.3-70b-versatile'),
-    system: THERAPIST_SYSTEM_PROMPT,
-    messages: await convertToModelMessages(messages),
-    abortSignal: req.signal,
-    temperature: 0.7,
-    maxTokens: 1024,
-  })
+  try {
+    const result = streamText({
+      model: groq('llama-3.3-70b-versatile'),
+      system: THERAPIST_SYSTEM_PROMPT,
+      messages: await convertToModelMessages(messages),
+      abortSignal: req.signal,
+      temperature: 0.7,
+      maxTokens: 1024,
+    })
 
-  return result.toUIMessageStreamResponse({
-    originalMessages: messages,
-    consumeSseStream: consumeStream,
-  })
+    return result.toUIMessageStreamResponse({
+      originalMessages: messages,
+      consumeSseStream: consumeStream,
+    })
+  } catch (error) {
+    console.error('Chat generation failed:', error)
+    return new Response('Shanti AI could not generate a response right now.', { status: 500 })
+  }
 }

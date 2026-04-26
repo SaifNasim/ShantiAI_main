@@ -96,6 +96,7 @@ export function ChatPageClient({ user, profile: initialProfile, initialChats, mo
   const [pointsEvent, setPointsEvent] = useState<PointsEvent | null>(null)
   const [showChatList, setShowChatList] = useState(false)
   const [input, setInput] = useState('')
+  const [chatError, setChatError] = useState<string | null>(null)
   const [ttsEnabled, setTtsEnabled] = useState(true)
   const [isSpeaking, setIsSpeaking] = useState(false)
 
@@ -178,6 +179,7 @@ export function ChatPageClient({ user, profile: initialProfile, initialChats, mo
   }, [profile])
 
   const handleNewChat = useCallback(() => {
+    setChatError(null)
     setMessages([])
     setCurrentChatId(null)
     setShowMoodSelector(true)
@@ -238,40 +240,61 @@ export function ChatPageClient({ user, profile: initialProfile, initialChats, mo
 
   const handleSend = useCallback(async () => {
     if (!input.trim() || isLoading) return
+    setChatError(null)
     let chatId = currentChatId
-    if (!chatId) {
-      const res = await fetch('/api/chats', {
-        method: 'POST',
-        headers: { 'Content-Type': 'application/json' },
-        body: JSON.stringify({ title: input.slice(0, 50) + (input.length > 50 ? '...' : '') }),
-      })
-      const newChat = await res.json()
-      if (newChat?.id) {
-        chatId = newChat.id
-        setCurrentChatId(chatId)
-        setChats((prev) => [newChat, ...prev])
+    try {
+      if (!chatId) {
+        const res = await fetch('/api/chats', {
+          method: 'POST',
+          headers: { 'Content-Type': 'application/json' },
+          body: JSON.stringify({ title: input.slice(0, 50) + (input.length > 50 ? '...' : '') }),
+        })
+
+        if (!res.ok) {
+          throw new Error('Unable to create a new chat session.')
+        }
+
+        const newChat = await res.json()
+        if (newChat?.id) {
+          chatId = newChat.id
+          setCurrentChatId(chatId)
+          setChats((prev) => [newChat, ...prev])
+        }
       }
-    }
-    if (chatId) {
-      await fetch('/api/messages', {
-        method: 'POST',
-        headers: { 'Content-Type': 'application/json' },
-        body: JSON.stringify({ chat_id: chatId, role: 'user', content: input }),
-      })
-    }
-    await awardPoints(POINTS.MESSAGE_SENT, 'Shared your thoughts')
-    if (typeof window !== 'undefined') window.speechSynthesis?.cancel()
-    const msgText = input
-    sendMessage({ text: msgText })
-    setInput('')
-    if (chatId && messages.length === 0) {
-      const title = msgText.slice(0, 50) + (msgText.length > 50 ? '...' : '')
-      await fetch('/api/chats', {
-        method: 'PATCH',
-        headers: { 'Content-Type': 'application/json' },
-        body: JSON.stringify({ id: chatId, title }),
-      })
-      setChats((prev) => prev.map((c) => c.id === chatId ? { ...c, title } : c))
+
+      if (chatId) {
+        const saveUserMessageRes = await fetch('/api/messages', {
+          method: 'POST',
+          headers: { 'Content-Type': 'application/json' },
+          body: JSON.stringify({ chat_id: chatId, role: 'user', content: input }),
+        })
+
+        if (!saveUserMessageRes.ok) {
+          throw new Error('Unable to save your message.')
+        }
+      }
+
+      await awardPoints(POINTS.MESSAGE_SENT, 'Shared your thoughts')
+      if (typeof window !== 'undefined') window.speechSynthesis?.cancel()
+      const msgText = input
+      await sendMessage({ text: msgText })
+      setInput('')
+
+      if (chatId && messages.length === 0) {
+        const title = msgText.slice(0, 50) + (msgText.length > 50 ? '...' : '')
+        const updateChatRes = await fetch('/api/chats', {
+          method: 'PATCH',
+          headers: { 'Content-Type': 'application/json' },
+          body: JSON.stringify({ id: chatId, title }),
+        })
+
+        if (updateChatRes.ok) {
+          setChats((prev) => prev.map((c) => c.id === chatId ? { ...c, title } : c))
+        }
+      }
+    } catch (error) {
+      console.error('Chat send failed:', error)
+      setChatError(error instanceof Error ? error.message : 'Shanti AI could not respond right now.')
     }
   }, [input, isLoading, currentChatId, messages.length, awardPoints, sendMessage])
 
@@ -348,6 +371,14 @@ export function ChatPageClient({ user, profile: initialProfile, initialChats, mo
               <h2 className="text-xl font-semibold text-center mb-2">How are you feeling?</h2>
               <p className="text-sm text-muted-foreground text-center mb-6">Let&apos;s start by checking in with yourself</p>
               <MoodSelector value={currentMood} onChange={handleMoodSelect} />
+            </div>
+          </div>
+        )}
+
+        {chatError && (
+          <div className="mx-auto mt-4 w-full max-w-3xl px-4">
+            <div className="rounded-xl border border-red-500/30 bg-red-500/10 px-4 py-3 text-sm text-red-300">
+              {chatError}
             </div>
           </div>
         )}
