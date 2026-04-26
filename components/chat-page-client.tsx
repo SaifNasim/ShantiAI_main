@@ -86,6 +86,7 @@ interface ChatPageClientProps {
 }
 
 export function ChatPageClient({ user, profile: initialProfile, initialChats, moodEntriesCount }: ChatPageClientProps) {
+  const [speechSupported, setSpeechSupported] = useState(false)
   const messagesEndRef = useRef<HTMLDivElement>(null)
   const [chats, setChats] = useState<Chat[]>(initialChats)
   const [currentChatId, setCurrentChatId] = useState<string | null>(null)
@@ -95,7 +96,7 @@ export function ChatPageClient({ user, profile: initialProfile, initialChats, mo
   const [pointsEvent, setPointsEvent] = useState<PointsEvent | null>(null)
   const [showChatList, setShowChatList] = useState(false)
   const [input, setInput] = useState('')
-  const [ttsEnabled, setTtsEnabled] = useState(false)
+  const [ttsEnabled, setTtsEnabled] = useState(true)
   const [isSpeaking, setIsSpeaking] = useState(false)
 
   // Create Chat instance once — passing via `chat` prop bypasses all re-creation logic in useChat
@@ -114,23 +115,52 @@ export function ChatPageClient({ user, profile: initialProfile, initialChats, mo
     messagesEndRef.current?.scrollIntoView({ behavior: 'smooth' })
   }, [messages])
 
+  useEffect(() => {
+    if (typeof window === 'undefined' || !('speechSynthesis' in window)) {
+      setSpeechSupported(false)
+      setTtsEnabled(false)
+      return
+    }
+
+    setSpeechSupported(true)
+    window.speechSynthesis.getVoices()
+
+    const savedPreference = window.localStorage.getItem('shanti-ai-tts-enabled')
+    if (savedPreference !== null) {
+      setTtsEnabled(savedPreference === 'true')
+    }
+  }, [])
+
   const speak = useCallback((text: string) => {
-    if (!ttsEnabled || typeof window === 'undefined' || !window.speechSynthesis) return
+    if (!ttsEnabled || !speechSupported || typeof window === 'undefined' || !window.speechSynthesis) return
     window.speechSynthesis.cancel()
     const utterance = new SpeechSynthesisUtterance(text)
+    const voices = window.speechSynthesis.getVoices()
+    const preferredVoice =
+      voices.find((voice) => voice.lang.startsWith('en')) ||
+      voices.find((voice) => voice.default) ||
+      voices[0]
+    if (preferredVoice) {
+      utterance.voice = preferredVoice
+    }
     utterance.rate = 0.95
     utterance.pitch = 1.0
     utterance.onstart = () => setIsSpeaking(true)
     utterance.onend = () => setIsSpeaking(false)
     utterance.onerror = () => setIsSpeaking(false)
     window.speechSynthesis.speak(utterance)
-  }, [ttsEnabled])
+  }, [speechSupported, ttsEnabled])
 
   const handleToggleTts = useCallback(() => {
-    if (ttsEnabled && typeof window !== 'undefined') window.speechSynthesis?.cancel()
-    setTtsEnabled((prev) => !prev)
+    if (!speechSupported || typeof window === 'undefined') return
+    if (ttsEnabled) window.speechSynthesis?.cancel()
+    setTtsEnabled((prev) => {
+      const nextValue = !prev
+      window.localStorage.setItem('shanti-ai-tts-enabled', String(nextValue))
+      return nextValue
+    })
     setIsSpeaking(false)
-  }, [ttsEnabled])
+  }, [speechSupported, ttsEnabled])
 
   const awardPoints = useCallback(async (points: number, reason: string) => {
     if (!profile) return
