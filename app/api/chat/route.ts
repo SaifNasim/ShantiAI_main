@@ -11,10 +11,6 @@ import { getUserById } from '@/lib/db'
 
 export const maxDuration = 60
 
-const groq = createGroq({
-  apiKey: process.env.GROQ_API_KEY,
-})
-
 const THERAPIST_SYSTEM_PROMPT = `You are Shanti AI, a compassionate and empathetic AI wellness companion.
 
 Your role is to:
@@ -38,9 +34,15 @@ Guidelines:
 Start conversations warmly, and always end with something supportive or a gentle question to continue the dialogue.`
 
 export async function POST(req: Request) {
-  if (!process.env.GROQ_API_KEY) {
+  const groqApiKey = process.env.GROQ_API_KEY?.trim()
+
+  if (!groqApiKey) {
     return new Response('AI service is not configured. Missing GROQ_API_KEY.', { status: 500 })
   }
+
+  const groq = createGroq({
+    apiKey: groqApiKey,
+  })
 
   const { messages }: { messages: UIMessage[] } = await req.json()
 
